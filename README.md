@@ -4,9 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 
 ## Example prompts
 
-- "List the Odoo models available in my work instance."
-- "Find the five newest customers in the work instance."
-- "Show the fields on `res.partner` and read that customer's email address."
+- "List customer's email addresses."
 - "Create a partner named Northwind Trading with this email address."
 - "Update this sales order's note."
 
@@ -14,7 +12,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 
 - **Browse models** — list available models and inspect their fields.
 - **Manage records** — search with Odoo domains and perform standard CRUD operations.
-- **Connect instances** — configure separate work, personal, or other Odoo instances.
+- **Connect instances** — configure separate Odoo instances.
 - **Version-aware behavior** — select compatibility behavior using each instance's configured Odoo version.
 - **Read-only access** — keep selected instances read-only; mutation calls are rejected for them.
 
@@ -27,7 +25,7 @@ $MCP_ODOO_RC/config.yaml
 $HOME/.config/mcp-odoo/config.yaml  # when MCP_ODOO_RC is unset
 ```
 
-Set `MCP_ODOO_RC` to use a different directory. Each key under `instances` is a stable instance name used when selecting an Odoo connection.
+Set `MCP_ODOO_RC` to use a different directory. Each key under `instances` is a user-chosen name for an Odoo connection, such as a company or deployment identifier. The name identifies the connection.
 
 **Instances**
 
@@ -49,18 +47,18 @@ Use a dedicated Odoo user with only the access rights the MCP server needs. Keep
 ```yaml
 # ~/.config/mcp-odoo/config.yaml
 instances:
-  work:
-    url: https://odoo.example.com
-    database: work_db
-    username: mcp-work@example.com
-    api_key: "replace-with-work-api-key"
+  company_a:
+    url: https://company-a.odoo.example.com
+    database: company_a_db
+    username: mcp-company-a@example.com
+    api_key: "replace-with-company-a-api-key"
     version: "18.0"
     readonly: false
-  personal:
-    url: https://personal-odoo.example.com
-    database: personal_db
-    username: mcp-personal@example.com
-    api_key: "replace-with-personal-api-key"
+  company_b:
+    url: https://company-b.odoo.example.com
+    database: company_b_db
+    username: mcp-company-b@example.com
+    api_key: "replace-with-company-b-api-key"
     version: "20.0"
     readonly: true
 
@@ -78,7 +76,7 @@ MCP tool registration is server-wide. Therefore:
 - If all configured instances are readonly, do not register `create_record`, `update_record`, or `delete_record`.
 - If at least one instance is writable, register mutation tools and reject calls targeting readonly instances.
 
-This rule allows a writable work instance and readonly personal instance to coexist without weakening either instance's configured policy.
+This rule allows instances to have independent readonly policies.
 
 ## Configuration and instance selection
 
