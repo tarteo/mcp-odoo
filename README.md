@@ -7,6 +7,9 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 - "List customer's email addresses."
 - "Create a partner named Northwind Trading with this email address."
 - "Update this sales order's note."
+- "What are my highest priority tasks todo today?"
+- "Fill in my time sheet based on this file."
+-  "What messages do I have in my inbox?"
 
 ## Features
 
