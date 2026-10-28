@@ -13,7 +13,6 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 
 ## Features
 
-- **Browse models** — list available models and inspect their fields.
 - **Manage records** — search with Odoo domains and perform standard CRUD operations.
 - **Connect instances** — configure separate Odoo instances.
 - **Version-aware behavior** — select compatibility behavior using each instance's configured Odoo version.
