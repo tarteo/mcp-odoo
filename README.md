@@ -171,3 +171,7 @@ The server exposes a standard MCP surface.
   - `odoo://instances/{instance}/models/{model}/records/{record_id}` — one record by ID.
 
 Resources are always instance-qualified so their URIs remain stable when configuration changes. Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions.
+
+## Domain-specific shortcuts
+
+Domain-specific tools are semantic shortcuts over common Odoo workflows. Document them separately from generic CRUD so callers can use concepts such as "high priority" without needing to know which model field represents that concept in each supported version. Each shortcut uses the selected instance's version adapter and follows the same instance-selection and access-control rules as generic tools.
