@@ -87,6 +87,7 @@ class Json2Adapter:
         "create": _Json2Method(("vals_list",)),
         "write": _Json2Method(("ids", "vals")),
         "unlink": _Json2Method(("ids",)),
+        "message_post": _Json2Method(("ids",)),
         "fields_get": _Json2Method(("allfields", "attributes")),
     }
 

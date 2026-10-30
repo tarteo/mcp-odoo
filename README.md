@@ -75,7 +75,7 @@ Readonly is configured per instance. Read and metadata tools and both resources 
 
 MCP tool registration is server-wide. Therefore:
 
-- If all configured instances are readonly, do not register `create_record`, `update_record`, or `delete_record`.
+- If all configured instances are readonly, do not register `create_record`, `update_record`, `delete_record`, or `post_message`.
 - If at least one instance is writable, register mutation tools and reject calls targeting readonly instances.
 
 This rule allows instances to have independent readonly policies.
@@ -157,8 +157,10 @@ The server exposes a standard MCP surface.
 
 - **tools/** — high-level actions:
   - `config_info` — show the config file path and configured instance names, versions, and readonly settings; never return API keys.
-  - `list_models` — list models available through the selected instance.
-  - `get_model_fields` — inspect a model's fields and metadata.
+  - `list_models` — search models by technical name or label (`search`, case-insensitive substring). `limit` defaults to 50 and is capped at 200.
+  - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200.
+  - `read_messages` — read chatter messages (newest first) of a record on a `mail.thread` model. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
+  - `post_message` — post a message, or an internal note with `internal_note`, on a `mail.thread` record and return the message ID. Treated as a mutation.
   - `search_records` — search a model using an Odoo domain, optional fields, and pagination. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
   - `read_record` — fetch a record by model and record ID, optionally selecting fields.
   - `create_record` — create a record from a field/value mapping and return its new record ID.
@@ -169,6 +171,7 @@ The server exposes a standard MCP surface.
 - **resources/** — read-only record views:
   - `odoo://instances/{instance}/models/{model}/records` — up to 20 records from a model in the selected instance.
   - `odoo://instances/{instance}/models/{model}/records/{record_id}` — one record by ID.
+  - `odoo://instances/{instance}/models/{model}/records/{record_id}/messages` — latest 20 chatter messages of a record.
 
 Resources are always instance-qualified so their URIs remain stable when configuration changes. Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions.
 

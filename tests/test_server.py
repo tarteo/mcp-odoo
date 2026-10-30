@@ -26,8 +26,9 @@ class ServerTests(unittest.TestCase):
         configure(self.config({"locked": instance}))
         names = set(mcp._tool_manager._tools)
         self.assertTrue({"config_info", "list_models", "get_model_fields", "search_records", "read_record"} <= names)
-        self.assertFalse({"create_record", "update_record", "delete_record"} & names)
-        self.assertEqual(len(mcp._resource_manager._templates), 2)
+        self.assertIn("read_messages", names)
+        self.assertFalse({"create_record", "update_record", "delete_record", "post_message"} & names)
+        self.assertEqual(len(mcp._resource_manager._templates), 3)
 
     def test_mutation_tools_exist_for_mixed_instances_but_enforce_readonly(self) -> None:
         locked = {**self.instance, "readonly": True}

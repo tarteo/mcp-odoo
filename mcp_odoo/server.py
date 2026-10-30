@@ -22,11 +22,11 @@ def configure(config: Config) -> None:
 
     writable = any(not instance.readonly for instance in config.instances.values())
     if writable and not _mutation_tools_registered:
-        for tool in (create_record, update_record, delete_record):
+        for tool in (create_record, update_record, delete_record, post_message):
             mcp.add_tool(tool)
         _mutation_tools_registered = True
     elif not writable and _mutation_tools_registered:
-        for name in ("create_record", "update_record", "delete_record"):
+        for name in ("create_record", "update_record", "delete_record", "post_message"):
             mcp.remove_tool(name)
         _mutation_tools_registered = False
 
@@ -76,27 +76,59 @@ def config_info() -> dict:
 
 
 @mcp.tool()
-def list_models(instance: str | None = None) -> list[dict]:
-    """List models available to the selected Odoo user."""
+def list_models(
+    search: str | None = None,
+    limit: int = 50,
+    instance: str | None = None,
+) -> list[dict]:
+    """Search models by technical name or label (case-insensitive substring). Omit search to list the first models."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    domain = ['|', ("model", "ilike", search), ("name", "ilike", search)] if search else []
     return _call(
         instance,
         "ir.model",
         "search_read",
-        [[]],
-        {"fields": ["model", "name"], "limit": 1000, "order": "model"},
+        [domain],
+        {"fields": ["model", "name"], "limit": min(limit, 200), "order": "model"},
     )
 
 
 @mcp.tool()
-def get_model_fields(model: str, instance: str | None = None) -> dict:
-    """Return field definitions for an Odoo model."""
-    return _call(
+def get_model_fields(
+    model: str,
+    search: str | None = None,
+    limit: int = 50,
+    instance: str | None = None,
+) -> dict:
+    """Return field definitions for an Odoo model, filtered by a case-insensitive substring of the field name or label."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    domain: list[Any] = [("model", "=", model)]
+    if search:
+        domain += ["|", ("name", "ilike", search), ("field_description", "ilike", search)]
+    records = _call(
         instance,
-        model,
-        "fields_get",
-        [],
-        {"attributes": ["string", "type", "required", "readonly", "relation", "selection", "help"]},
+        "ir.model.fields",
+        "search_read",
+        [domain],
+        {
+            "fields": ["name", "field_description", "ttype", "required", "readonly", "relation", "help"],
+            "limit": min(limit, 200),
+            "order": "name",
+        },
     )
+    return {
+        record["name"]: {
+            "string": record["field_description"],
+            "type": record["ttype"],
+            "required": record["required"],
+            "readonly": record["readonly"],
+            "relation": record["relation"] or None,
+            "help": record["help"] or None,
+        }
+        for record in records
+    }
 
 
 @mcp.tool()
@@ -155,6 +187,64 @@ def update_record(
 def delete_record(model: str, record_id: int, instance: str | None = None) -> bool:
     """Permanently delete a record from Odoo."""
     return _call(instance, model, "unlink", [[record_id]], mutation=True)
+
+
+_MESSAGE_FIELDS = ["id", "date", "author_id", "message_type", "subtype_id", "subject", "body"]
+
+
+def _messages(instance: str | None, model: str, record_id: int, limit: int, offset: int) -> list[dict]:
+    return _call(
+        instance,
+        "mail.message",
+        "search_read",
+        [[("model", "=", model), ("res_id", "=", record_id)]],
+        {"fields": _MESSAGE_FIELDS, "limit": limit, "offset": offset, "order": "date desc, id desc"},
+    )
+
+
+@mcp.tool()
+def read_messages(
+    model: str,
+    record_id: int,
+    limit: int = 20,
+    offset: int = 0,
+    instance: str | None = None,
+) -> list[dict]:
+    """Read chatter messages (newest first) of a record whose model inherits mail.thread."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    if offset < 0:
+        raise ValueError("offset must not be negative")
+    return _messages(instance, model, record_id, min(limit, 100), offset)
+
+
+@mcp.tool()
+def post_message(
+    model: str,
+    record_id: int,
+    body: str,
+    internal_note: bool = False,
+    instance: str | None = None,
+) -> int:
+    """Post a message (or internal note) on a mail.thread record and return the message ID."""
+    return _call(
+        instance,
+        model,
+        "message_post",
+        [[record_id]],
+        {
+            "body": body,
+            "message_type": "comment",
+            "subtype_xmlid": "mail.mt_note" if internal_note else "mail.mt_comment",
+        },
+        mutation=True,
+    )
+
+
+@mcp.resource("odoo://instances/{instance}/models/{model}/records/{record_id}/messages")
+def record_messages_resource(instance: str, model: str, record_id: str) -> list[dict]:
+    """Latest 20 chatter messages of a record."""
+    return _messages(instance, model, int(record_id), 20, 0)
 
 
 @mcp.resource("odoo://instances/{instance}/models/{model}/records")
