@@ -57,6 +57,24 @@ def _call(
     return OdooClient(selected).call(model, method, args, kwargs)
 
 
+def _readable_fields(
+    instance: str | None,
+    model: str,
+    fields: list[str] | None,
+) -> list[str] | None:
+    """Explicit fields win; otherwise list all non-binary fields of the model."""
+    if fields:
+        return fields
+    records = _call(
+        instance,
+        "ir.model.fields",
+        "search_read",
+        [[("model", "=", model), ("ttype", "!=", "binary")]],
+        {"fields": ["name"]},
+    )
+    return [record["name"] for record in records] or None
+
+
 @mcp.tool()
 def config_info() -> dict:
     """Show the config path and configured instance names without secrets."""
@@ -140,7 +158,7 @@ def search_records(
     offset: int = 0,
     instance: str | None = None,
 ) -> list[dict]:
-    """Search records using an Odoo domain with bounded pagination."""
+    """Search records using an Odoo domain with bounded pagination. Binary/image fields are omitted unless listed in fields."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
     if offset < 0:
@@ -150,7 +168,11 @@ def search_records(
         model,
         "search_read",
         [domain or []],
-        {"fields": fields, "limit": min(limit, 100), "offset": offset},
+        {
+            "fields": _readable_fields(instance, model, fields),
+            "limit": min(limit, 100),
+            "offset": offset,
+        },
     )
 
 
@@ -161,8 +183,14 @@ def read_record(
     fields: list[str] | None = None,
     instance: str | None = None,
 ) -> dict | None:
-    """Read one record by ID, optionally selecting fields."""
-    records = _call(instance, model, "read", [[record_id]], {"fields": fields})
+    """Read one record by ID. Binary/image fields are omitted unless listed in fields."""
+    records = _call(
+        instance,
+        model,
+        "read",
+        [[record_id]],
+        {"fields": _readable_fields(instance, model, fields)},
+    )
     return records[0] if records else None
 
 
@@ -255,12 +283,18 @@ def model_records_resource(instance: str, model: str) -> list[dict]:
         model,
         "search_read",
         [[]],
-        {"limit": 20, "offset": 0},
+        {"fields": _readable_fields(instance, model, None), "limit": 20, "offset": 0},
     )
 
 
 @mcp.resource("odoo://instances/{instance}/models/{model}/records/{record_id}")
 def record_resource(instance: str, model: str, record_id: str) -> dict | None:
     """One Odoo record by ID."""
-    records = _call(instance, model, "read", [[int(record_id)]], {})
+    records = _call(
+        instance,
+        model,
+        "read",
+        [[int(record_id)]],
+        {"fields": _readable_fields(instance, model, None)},
+    )
     return records[0] if records else None

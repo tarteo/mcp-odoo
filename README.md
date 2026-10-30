@@ -161,8 +161,8 @@ The server exposes a standard MCP surface.
   - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200.
   - `read_messages` — read chatter messages (newest first) of a record on a `mail.thread` model. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
   - `post_message` — post a message, or an internal note with `internal_note`, on a `mail.thread` record and return the message ID. Treated as a mutation.
-  - `search_records` — search a model using an Odoo domain, optional fields, and pagination. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
-  - `read_record` — fetch a record by model and record ID, optionally selecting fields.
+  - `search_records` — search a model using an Odoo domain, optional fields, and pagination. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0. Binary and image fields are omitted unless named in `fields`.
+  - `read_record` — fetch a record by model and record ID, optionally selecting fields. Binary and image fields are omitted unless named in `fields`.
   - `create_record` — create a record from a field/value mapping and return its new record ID.
   - `update_record` — update a record by model and record ID using a field/value mapping.
   - `delete_record` — delete a record by model and record ID. Deletion is permanent in Odoo.
