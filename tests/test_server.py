@@ -68,6 +68,18 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer secret")
         self.assertEqual(request.get_header("X-odoo-database"), "main")
 
+    def test_legacy_create_unwraps_single_record_id(self) -> None:
+        instance = self.config({"company": {**self.instance, "version": "18.0"}}).instances["company"]
+        common = MagicMock()
+        common.__enter__.return_value.authenticate.return_value = 1
+        objects = MagicMock()
+        objects.__enter__.return_value.execute_kw.return_value = [7]
+
+        with patch("mcp_odoo.odoo_client.xmlrpc.client.ServerProxy", side_effect=[common, objects]):
+            result = LegacyRpcAdapter(instance).call("res.partner", "create", [[{"name": "Example"}]], {})
+
+        self.assertEqual(result, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

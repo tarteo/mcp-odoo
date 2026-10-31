@@ -56,7 +56,7 @@ class LegacyRpcAdapter:
             with xmlrpc.client.ServerProxy(
                 object_url, transport=transport, allow_none=True, use_builtin_types=True
             ) as objects:
-                return objects.execute_kw(
+                result = objects.execute_kw(
                     self.instance.database,
                     user_id,
                     self.instance.api_key,
@@ -65,6 +65,9 @@ class LegacyRpcAdapter:
                     args,
                     kwargs,
                 )
+            if method == "create" and isinstance(result, list) and len(result) == 1:
+                return result[0]
+            return result
         except OdooError:
             raise
         except (OSError, xmlrpc.client.Error) as exc:
