@@ -151,6 +151,29 @@ For a different config directory, set `MCP_ODOO_RC` before starting the process.
 
 3. Verify with `opencode mcp list`; the `odoo` server should show as connected.
 
+## Using with Oh My Pi
+
+Build the Docker image as described in [Using with OpenCode](#using-with-opencode-docker), then register the server in `.omp/agent/mcp.json` at the project root:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "odoo": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/home/<you>/.config/mcp-odoo:/config:ro",
+        "-e", "MCP_ODOO_RC=/config",
+        "mcp-odoo"
+      ]
+    }
+  }
+}
+```
+
+Replace `/home/<you>` with the absolute path to your home directory; `~` is not expanded in the mount. The config directory is mounted read-only. Keep `-i`: MCP communicates over standard input and output. Start or restart Oh My Pi, then verify with `/mcp list` and `/mcp test odoo`.
+
 ## Tools and resources
 
 The server exposes a standard MCP surface.
