@@ -1,6 +1,6 @@
 # mcp-odoo
 
-A local [Model Context Protocol](https://modelcontextprotocol.io/) server for working with Odoo records. Connect one or more Odoo instances, inspect models and fields, and search, read, create, update, or delete records through your MCP client. The server supports Odoo 18.0, 19.0, and 20.0.
+A local [Model Context Protocol](https://modelcontextprotocol.io/) server for working with Odoo records. Connect an Odoo database, inspect models and fields, and search, read, create, update, or delete records through your MCP client. The server supports Odoo 18.0, 19.0, and 20.0.
 
 ## Example prompts
 
@@ -14,9 +14,8 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 ## Features
 
 - **Manage records** — search with Odoo domains and perform standard CRUD operations.
-- **Connect instances** — configure separate Odoo instances.
-- **Version-aware behavior** — select compatibility behavior using each instance's configured Odoo version.
-- **Read-only access** — keep selected instances read-only; mutation calls are rejected for them.
+- **Tool whitelist** — expose only the configured tools, with three safe discovery/configuration tools always available.
+- **Version-aware behavior** — select compatibility behavior using the configured Odoo version.
 
 ## Configuration reference
 
@@ -27,16 +26,21 @@ $MCP_ODOO_RC/config.yaml
 $HOME/.config/mcp-odoo/config.yaml  # when MCP_ODOO_RC is unset
 ```
 
-Set `MCP_ODOO_RC` to use a different directory. Each key under `instances` is a user-chosen name for an Odoo connection, such as a company or deployment identifier. The name identifies the connection.
+Set `MCP_ODOO_RC` to use a different directory. Each config file represents exactly one Odoo connection. To connect to multiple databases, create a separate config directory and MCP server entry for each one.
 
-**Instances**
+**Connection**
 
-- `instances.<name>.url` *(required)* — base URL of the Odoo server.
-- `instances.<name>.database` *(required)* — Odoo database name.
-- `instances.<name>.username` *(required)* — Odoo user account.
-- `instances.<name>.api_key` *(required)* — API key for that Odoo user. Treat it as a secret.
-- `instances.<name>.version` *(required)* — Odoo version: `18.0`, `19.0`, or `20.0`.
-- `instances.<name>.readonly` *(optional, default `false`)* — disallow record creation, updates, and deletion for this instance.
+- `url` *(required)* — base URL of the Odoo server.
+- `database` *(required)* — Odoo database name.
+- `username` *(required)* — Odoo user account.
+- `api_key` *(required)* — API key for that Odoo user. Treat it as a secret.
+- `version` *(required)* — Odoo version: `18.0`, `19.0`, or `20.0`.
+
+**Tool access**
+
+- `whitelist` *(required)* — list of tools to expose. It may be empty. Available names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, and `delete_record`.
+- `config_info`, `list_models`, and `get_model_fields` are always available and do not need to be listed.
+- Resource reads are allowed only when their corresponding `read_messages`, `search_records`, or `read_record` tool is whitelisted.
 
 **General**
 
@@ -48,55 +52,35 @@ Use a dedicated Odoo user with only the access rights the MCP server needs. Keep
 
 ```yaml
 # ~/.config/mcp-odoo/config.yaml
-instances:
-  company_a:
-    url: https://company-a.odoo.example.com
-    database: company_a_db
-    username: mcp-company-a@example.com
-    api_key: "replace-with-company-a-api-key"
-    version: "18.0"
-    readonly: false
-  company_b:
-    url: https://company-b.odoo.example.com
-    database: company_b_db
-    username: mcp-company-b@example.com
-    api_key: "replace-with-company-b-api-key"
-    version: "20.0"
-    readonly: true
+url: https://company-a.odoo.example.com
+database: company_a_db
+username: mcp-company-a@example.com
+api_key: "replace-with-company-a-api-key"
+version: "18.0"
+
+whitelist:
+  - search_records
+  - read_messages
+  - post_message
+  - read_record
+  - create_record
+  - update_record
+  - delete_record
 
 log_level: info
 ```
 
-Each configured instance must declare its version. The server does not infer a version from the URL or silently select an instance when more than one is configured.
+The connection version is required. The server does not infer it from the URL. The whitelist is validated against known tool names, and unknown or duplicate names are rejected.
 
-## Read-only enforcement
+## Whitelist enforcement
 
-Readonly is configured per instance. Read and metadata tools and both resources remain available for readonly instances. Mutation calls resolve the target instance first, then reject the operation if that instance is readonly. The check is enforced at call time, not just by hiding tools from the client.
+Only whitelisted tools (plus the three always-available tools) are registered with MCP. Resource reads independently check for the matching read tool in the whitelist.
 
-MCP tool registration is server-wide. Therefore:
-
-- If all configured instances are readonly, do not register `create_record`, `update_record`, `delete_record`, or `post_message`.
-- If at least one instance is writable, register mutation tools and reject calls targeting readonly instances.
-
-This rule allows instances to have independent readonly policies.
-
-## Configuration and instance selection
-
-The server loads `config.yaml` from `$MCP_ODOO_RC`, or from `~/.config/mcp-odoo` when the environment variable is unset. The top-level `instances` mapping is keyed by a stable user-chosen name. Each entry contains the Odoo URL, database, username, API key, explicit version, and optional readonly setting.
-
-The supported version set is Odoo 18.0, 19.0, and 20.0. Versions are explicit configuration, not inferred from a connection or endpoint. Missing, malformed, or unsupported versions fail configuration validation instead of selecting a fallback adapter.
-
-Every tool call resolves its `instance` before connecting:
-
-- With one configured instance, omission resolves to that instance.
-- With multiple instances, omission is an error; no instance is preferred by ordering.
-- An unknown instance name is an error and must not trigger a retry against another instance.
-
-Resources use instance-qualified URIs for both one- and multi-instance configurations. This gives resource identifiers stable meaning independent of how many instances are currently configured.
+The whitelist controls MCP tool availability, not Odoo permissions. Odoo access rights and record rules still apply, so use a dedicated Odoo user with only the permissions the configured tools need.
 
 ## Version compatibility
 
-An instance's configured version selects a compatibility adapter. The generic CRUD contract stays consistent across supported versions; adapters isolate differences in RPC behavior, capabilities, and model metadata. Generic CRUD uses the actual model and field names accepted by that Odoo version. It does not guess that arbitrary fields in user-provided domains or value mappings should be renamed.
+The configured version selects a compatibility adapter. The generic CRUD contract stays consistent across supported versions; adapters isolate differences in RPC behavior, capabilities, and model metadata. Generic CRUD uses the actual model and field names accepted by that Odoo version. It does not guess that arbitrary fields in user-provided domains or value mappings should be renamed.
 
 Version-specific domain tools should operate on semantic inputs and translate them through the selected adapter. For example, a hypothetical higher-level task that accepts a semantic priority could map that concept to a version-specific field; a field rename such as `priority` to `level` between Odoo 16.0 and 17.0 illustrates why this mapping belongs in a version adapter. This is an architectural example only: the initial supported versions are 18.0, 19.0, and 20.0, and the generic CRUD tools do not claim that mapping.
 
@@ -179,7 +163,7 @@ Replace `/home/<you>` with the absolute path to your home directory; `~` is not 
 The server exposes a standard MCP surface.
 
 - **tools/** — high-level actions:
-  - `config_info` — show the config file path and configured instance names, versions, and readonly settings; never return API keys.
+  - `config_info` — show the config file path, connection details, and whitelist; never return the API key.
   - `list_models` — search models by technical name or label (`search`, case-insensitive substring). `limit` defaults to 50 and is capped at 200.
   - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200.
   - `read_messages` — read chatter messages (newest first) of a record on a `mail.thread` model. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
@@ -189,15 +173,14 @@ The server exposes a standard MCP surface.
   - `create_record` — create a record from a field/value mapping and return its new record ID.
   - `update_record` — update a record by model and record ID using a field/value mapping.
   - `delete_record` — delete a record by model and record ID. Deletion is permanent in Odoo.
-  - All instance-scoped tools accept an optional `instance` name when exactly one instance is configured. With multiple instances, `instance` is required. There is no implicit first-instance fallback.
-  - Mutation tools are omitted when every configured instance is read-only. If writable instances exist, mutation tools are listed, but calls targeting a read-only instance are rejected.
+  - `config_info`, `list_models`, and `get_model_fields` are always available. All other tools are registered only when listed in the root-level `whitelist`.
 - **resources/** — read-only record views:
-  - `odoo://instances/{instance}/models/{model}/records` — up to 20 records from a model in the selected instance.
-  - `odoo://instances/{instance}/models/{model}/records/{record_id}` — one record by ID.
-  - `odoo://instances/{instance}/models/{model}/records/{record_id}/messages` — latest 20 chatter messages of a record.
+  - `odoo://models/{model}/records` — up to 20 records from a model; reading requires `search_records` in the whitelist.
+  - `odoo://models/{model}/records/{record_id}` — one record by ID; reading requires `read_record` in the whitelist.
+  - `odoo://models/{model}/records/{record_id}/messages` — latest 20 chatter messages of a record; reading requires `read_messages` in the whitelist.
 
-Resources are always instance-qualified so their URIs remain stable when configuration changes. Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions.
+Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions. To connect to multiple Odoo databases, configure a separate MCP server entry and config directory for each one.
 
 ## Domain-specific shortcuts
 
-Domain-specific tools are semantic shortcuts over common Odoo workflows. Document them separately from generic CRUD so callers can use concepts such as "high priority" without needing to know which model field represents that concept in each supported version. Each shortcut uses the selected instance's version adapter and follows the same instance-selection and access-control rules as generic tools.
+Domain-specific tools are semantic shortcuts over common Odoo workflows. Document them separately from generic CRUD so callers can use concepts such as "high priority" without needing to know which model field represents that concept in each supported version. Each shortcut uses the configured connection's version adapter and should follow the same whitelist and Odoo access-control rules as generic tools.
