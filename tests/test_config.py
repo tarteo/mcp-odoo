@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from mcp_odoo.config import ConfigError, parse_config
 
@@ -37,6 +38,101 @@ class ConfigTests(unittest.TestCase):
     def test_exec_is_an_optional_whitelistable_tool(self) -> None:
         config = self.parse({"whitelist": ["exec"]})
         self.assertEqual(config.whitelist, frozenset({"exec"}))
+
+    def test_core_registry_method_can_be_whitelisted(self) -> None:
+        config = self.parse({"whitelist": ["sale.order.action_confirm"]})
+        spec = config.method_registry["sale.order.action_confirm"]
+        self.assertEqual(spec.model, "sale.order")
+        self.assertEqual(spec.method, "action_confirm")
+        self.assertEqual(spec.parameters["ids"]["type"], "array")
+
+    def test_custom_registry_file_can_be_whitelisted(self) -> None:
+        with TemporaryDirectory() as directory:
+            registry_path = Path(directory) / "mycustom.yaml"
+            registry_path.write_text(
+                """sale.order.custom_operation:
+  description: Run a custom operation.
+  parameters:
+    ids:
+      type: array
+      items:
+        type: integer
+    note:
+      type: string
+      required: false
+""",
+                encoding="utf-8",
+            )
+            config = self.parse(
+                {
+                    "whitelist": ["sale.order.custom_operation"],
+                    "registry": ["registry/18.0.yaml", str(registry_path)],
+                }
+            )
+        self.assertIn("sale.order.custom_operation", config.method_registry)
+        self.assertIn("sale.order.action_confirm", config.method_registry)
+        self.assertEqual(
+            config.method_registry["sale.order.custom_operation"].method,
+            "custom_operation",
+        )
+
+    def test_relative_registry_path_is_resolved_beside_config(self) -> None:
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.yaml"
+            registry_path = Path(directory) / "mycustom.yaml"
+            registry_path.write_text(
+                """sale.order.custom_operation:
+  description: Run a custom operation.
+  parameters: {}
+""",
+                encoding="utf-8",
+            )
+            config = parse_config(
+                {
+                    **self.instance,
+                    "registry": ["mycustom.yaml"],
+                    "whitelist": ["sale.order.custom_operation"],
+                },
+                config_path,
+            )
+        self.assertIn("sale.order.custom_operation", config.method_registry)
+
+    def test_registry_files_cannot_duplicate_method_entries(self) -> None:
+        core_registry = Path(__file__).parent.parent / "registry" / "18.0.yaml"
+        with TemporaryDirectory() as directory:
+            duplicate_path = Path(directory) / "duplicate.yaml"
+            duplicate_path.write_text(
+                """sale.order.action_confirm:
+  description: Replacement.
+  parameters: {}
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "duplicate method entries"):
+                self.parse({"registry": [str(core_registry), str(duplicate_path)]})
+
+    def test_registry_file_parameter_schemas_are_validated(self) -> None:
+        with TemporaryDirectory() as directory:
+            registry_path = Path(directory) / "invalid.yaml"
+            registry_path.write_text(
+                """sale.order.custom_operation:
+  description: Run a custom operation.
+  parameters:
+    value:
+      type: unsupported
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "expected one of"):
+                self.parse({"registry": [str(registry_path)]})
+
+    def test_registry_paths_must_be_a_list(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "registry: expected a list"):
+            self.parse({"registry": "registry/18.0.yaml"})
+
+    def test_inline_method_definitions_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "define custom methods in a registry file"):
+            self.parse({"methods": {}})
 
     def test_whitelist_requires_known_optional_tool_names(self) -> None:
         invalid = dict(self.instance)

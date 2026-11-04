@@ -1,15 +1,20 @@
+import inspect
 import logging
 import sys
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 
-from .config import ALWAYS_AVAILABLE_TOOLS, Config, ConfigError, load_config
+from .config import ALWAYS_AVAILABLE_TOOLS, WHITELISTABLE_TOOLS, Config, ConfigError, load_config
 from .odoo_client import OdooClient
+from .registry import MethodSpec
 
 mcp = FastMCP("odoo")
 _config: Config | None = None
 _registered_tool_names: set[str] = set()
+_registered_method_tool_names: set[str] = set()
 
 
 def configure(config: Config) -> None:
@@ -20,13 +25,27 @@ def configure(config: Config) -> None:
         level=getattr(logging, config.log_level.upper()),
     )
 
-    enabled_names = ALWAYS_AVAILABLE_TOOLS | config.whitelist
+    enabled_names = ALWAYS_AVAILABLE_TOOLS | (config.whitelist & WHITELISTABLE_TOOLS)
+    enabled_methods = [
+        spec for key, spec in config.method_registry.items() if key in config.whitelist
+    ]
+    dynamic_names = [spec.tool_name for spec in enabled_methods]
+    if len(dynamic_names) != len(set(dynamic_names)) or set(dynamic_names) & set(_TOOL_FUNCTIONS):
+        raise ConfigError("method registry generated a tool name that conflicts with another tool")
+
     for name in _registered_tool_names - enabled_names:
         mcp.remove_tool(name)
         _registered_tool_names.remove(name)
     for name in enabled_names - _registered_tool_names:
         mcp.add_tool(_TOOL_FUNCTIONS[name])
         _registered_tool_names.add(name)
+
+    for name in _registered_method_tool_names:
+        mcp.remove_tool(name)
+    _registered_method_tool_names.clear()
+    for spec in enabled_methods:
+        mcp.add_tool(_method_tool(spec), name=spec.tool_name, description=spec.description)
+        _registered_method_tool_names.add(spec.tool_name)
 
 
 def _cfg() -> Config:
@@ -52,6 +71,52 @@ def _call(
     kwargs: dict | None = None,
 ) -> object:
     return OdooClient(_cfg().instance).call(model, method, args, kwargs)
+
+
+def _parameter_annotation(parameter: dict[str, Any]) -> Any:
+    parameter_type = parameter["type"]
+    annotation: Any = {
+        "boolean": bool,
+        "integer": int,
+        "number": float,
+        "object": dict[str, Any],
+        "string": str,
+    }.get(parameter_type)
+    if parameter_type == "array":
+        annotation = list[_parameter_annotation(parameter["items"])]
+    description = parameter.get("description")
+    return Annotated[annotation, Field(description=description)] if description else annotation
+
+
+def _method_tool(spec: MethodSpec):
+    def invoke(**arguments: Any) -> object:
+        arguments = {name: value for name, value in arguments.items() if value is not None}
+        ids = arguments.pop("ids", None)
+        return OdooClient(_cfg().instance).call_public(
+            spec.model,
+            spec.method,
+            ids,
+            arguments,
+        )
+
+    invoke.__name__ = spec.tool_name
+    invoke.__doc__ = spec.description
+    parameters = []
+    for name, definition in spec.parameters.items():
+        default = inspect.Parameter.empty if definition["required"] else None
+        annotation = _parameter_annotation(definition)
+        if default is None:
+            annotation = annotation | None
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=annotation,
+            )
+        )
+    invoke.__signature__ = inspect.Signature(parameters, return_annotation=Any)
+    return invoke
 
 
 def _readable_fields(

@@ -14,7 +14,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server for wo
 ## Features
 
 - **Manage records** — search with Odoo domains and perform standard CRUD operations.
-- **Tool whitelist** — expose only the configured tools, with three safe discovery/configuration tools always available.
+- **Tool whitelist** — expose only the configured tools, including selected model methods from shared registry files, with three safe discovery/configuration tools always available.
 - **Version-aware behavior** — select compatibility behavior using the configured Odoo version.
 
 ## Configuration reference
@@ -38,7 +38,8 @@ Set `MCP_ODOO_RC` to use a different directory. Each config file represents exac
 
 **Tool access**
 
-- `whitelist` *(required)* — list of tools to expose. It may be empty. Available names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, `delete_record`, and `exec`.
+- `whitelist` *(required)* — list of tools to expose. It may be empty. Available built-in names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, `delete_record`, and `exec`. It may also contain a registered Odoo method key such as `sale.order.action_confirm`.
+- `registry` *(optional)* — list of method registry YAML file paths. If omitted, the bundled `registry/<version>.yaml` is used. If supplied, the listed files are merged and replace that default; include the bundled file if you want its methods too. Relative paths are resolved beside `config.yaml` first, then from the application root. Absolute paths are supported for mounted registry files.
 - `config_info`, `list_models`, and `get_model_fields` are always available and do not need to be listed.
 - Resource reads are allowed only when their corresponding `read_messages`, `search_records`, or `read_record` tool is whitelisted.
 
@@ -58,6 +59,10 @@ username: mcp-company-a@example.com
 api_key: "replace-with-company-a-api-key"
 version: "18.0"
 
+registry:
+  - registry/18.0.yaml
+  - /registries/mycustom.yaml
+
 whitelist:
   - search_records
   - read_messages
@@ -66,11 +71,37 @@ whitelist:
   - create_record
   - update_record
   - delete_record
+  - sale.order.action_confirm
+  - sale.order.custom_operation
 
 log_level: info
 ```
 
-The connection version is required. The server does not infer it from the URL. The whitelist is validated against known tool names, and unknown or duplicate names are rejected.
+The connection version is required. The server does not infer it from the URL. The whitelist is validated against built-in tools and the loaded registry files; unknown or duplicate names are rejected. Duplicate method entries across registry files are errors. Every method must also be listed in `whitelist` before a tool is registered.
+
+## Odoo method registry
+
+Core method definitions live in the bundled `registry/<version>.yaml` files and are shared by every connection using this server version. A whitelist entry registers the matching method as a typed MCP tool. For example, `sale.order.action_confirm` creates the tool `odoo_sale_order_action_confirm`, with its description and parameter schema from the registry. The registry is version-specific because Odoo method availability and signatures can differ between releases.
+
+To add custom methods, create another registry file and list its path in `registry`. For example, `mycustom.yaml` could contain:
+
+```yaml
+sale.order.custom_operation:
+  description: Run a custom operation on selected sales orders.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the sales orders to process.
+      required: true
+      items:
+        type: integer
+    note:
+      type: string
+      description: Optional note for the operation.
+      required: false
+```
+
+Add `sale.order.custom_operation` to `whitelist` to expose the method. Each method definition requires a non-empty `description` and a `parameters` mapping. Supported parameter types are `string`, `integer`, `number`, `boolean`, `object`, and `array`; arrays require an `items` schema. Parameters are required by default; set `required: false` to make one optional. If an optional parameter is not provided, it is omitted from the Odoo call. Object parameters accept arbitrary JSON objects. The method is called through the configured Odoo account, so Odoo access rights still apply. Registry files are curated metadata, not introspection: calls to methods that are unavailable on the target database will fail in Odoo.
 
 ## Whitelist enforcement
 
@@ -123,9 +154,10 @@ For a different config directory, set `MCP_ODOO_RC` before starting the process.
          "type": "local",
          "enabled": true,
          "command": [
-           "docker", "run", "-i", "--rm",
-           "-v", "/home/<you>/.config/mcp-odoo:/config:ro",
-           "-e", "MCP_ODOO_RC=/config",
+            "docker", "run", "-i", "--rm",
+            "-v", "/home/<you>/.config/mcp-odoo:/config:ro",
+            "-v", "/home/<you>/odoo-methods:/registries:ro",
+            "-e", "MCP_ODOO_RC=/config",
            "mcp-odoo"
          ]
        }
@@ -133,7 +165,7 @@ For a different config directory, set `MCP_ODOO_RC` before starting the process.
    }
    ```
 
-   Use an absolute host path; `~` is not expanded in the mount. The config directory is mounted read-only. Keep `-i`: MCP communicates over standard input and output.
+   Use absolute host paths; `~` is not expanded in mounts. The config and registry directories are mounted read-only. The second volume is only needed when `config.yaml` lists custom files under `/registries`. Keep `-i`: MCP communicates over standard input and output.
 
 3. Verify with `opencode mcp list`; the `odoo` server should show as connected.
 
@@ -150,6 +182,7 @@ Build the Docker image as described in [Using with OpenCode](#using-with-opencod
       "args": [
         "run", "-i", "--rm",
         "-v", "/home/<you>/.config/mcp-odoo:/config:ro",
+        "-v", "/home/<you>/odoo-methods:/registries:ro",
         "-e", "MCP_ODOO_RC=/config",
         "mcp-odoo"
       ]
@@ -158,7 +191,7 @@ Build the Docker image as described in [Using with OpenCode](#using-with-opencod
 }
 ```
 
-Replace `/home/<you>` with the absolute path to your home directory; `~` is not expanded in the mount. The config directory is mounted read-only. Keep `-i`: MCP communicates over standard input and output. Start or restart Oh My Pi, then verify with `/mcp list` and `/mcp test odoo`.
+Replace `/home/<you>` with the absolute path to your home directory; `~` is not expanded in mounts. The config and registry directories are mounted read-only. The registry volume is only needed when `config.yaml` lists custom files under `/registries`. Keep `-i`: MCP communicates over standard input and output. Start or restart Oh My Pi, then verify with `/mcp list` and `/mcp test odoo`.
 
 ## Tools and resources
 
@@ -176,6 +209,7 @@ The server exposes a standard MCP surface.
   - `update_record` — update a record by model and record ID using a field/value mapping.
   - `delete_record` — delete a record by model and record ID. Deletion is permanent in Odoo.
   - `exec` — invoke a method by model and method name, with optional record `ids` and named `params`. For example, `exec("sale.order", "action_confirm", ids=[42])` calls the method on that order. Odoo 20's JSON-2 API accepts named method parameters; supply them in `params` rather than as positional arguments. This tool is available only when `exec` is in the whitelist and may cause arbitrary business side effects.
+  - Registry methods — one typed tool per whitelisted `model.method` entry, named `odoo_<model>_<method>` with dots replaced by underscores. Their descriptions and input schemas come from the versioned core registry and any additional registry files listed in `registry`.
   - `config_info`, `list_models`, and `get_model_fields` are always available. All other tools are registered only when listed in the root-level `whitelist`.
 - **resources/** — read-only record views:
   - `odoo://models/{model}/records` — up to 20 records from a model; reading requires `search_records` in the whitelist.

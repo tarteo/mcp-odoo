@@ -1,6 +1,7 @@
 import json
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from mcp_odoo.config import ALWAYS_AVAILABLE_TOOLS, ConfigError, parse_config
@@ -31,6 +32,87 @@ class ServerTests(unittest.TestCase):
         names = set(mcp._tool_manager._tools)
         self.assertEqual(names, ALWAYS_AVAILABLE_TOOLS | set(whitelist))
         self.assertEqual(len(mcp._resource_manager._templates), 3)
+
+    def test_registered_method_tool_uses_registry_metadata_and_dispatches(self) -> None:
+        configure(self.config(["sale.order.action_confirm"]))
+        tool = mcp._tool_manager._tools["odoo_sale_order_action_confirm"]
+
+        self.assertEqual(tool.description, "Confirm the selected sales orders.")
+        self.assertEqual(
+            tool.parameters["properties"]["ids"]["items"]["type"],
+            "integer",
+        )
+        self.assertEqual(
+            tool.parameters["properties"]["ids"]["description"],
+            "IDs of the sales orders to confirm.",
+        )
+        self.assertIn("ids", tool.parameters["required"])
+
+        with patch("mcp_odoo.server.OdooClient") as client:
+            client.return_value.call_public.return_value = True
+            result = tool.fn(ids=[7, 8])
+
+        self.assertIs(result, True)
+        client.assert_called_once_with(self.config(["sale.order.action_confirm"]).instance)
+        client.return_value.call_public.assert_called_once_with(
+            "sale.order", "action_confirm", [7, 8], {}
+        )
+
+    def test_reconfigure_removes_method_tools_not_in_the_whitelist(self) -> None:
+        configure(self.config(["sale.order.action_confirm"]))
+        configure(self.config())
+        self.assertNotIn("odoo_sale_order_action_confirm", mcp._tool_manager._tools)
+
+    def test_custom_method_spec_generates_a_tool(self) -> None:
+        with TemporaryDirectory() as directory:
+            registry_path = Path(directory) / "mycustom.yaml"
+            registry_path.write_text(
+                """sale.order.custom_operation:
+  description: Run a custom operation.
+  parameters:
+    ids:
+      type: array
+      items:
+        type: integer
+    note:
+      type: string
+      required: false
+""",
+                encoding="utf-8",
+            )
+            values = {
+                **self.instance,
+                "whitelist": ["sale.order.custom_operation"],
+                "registry": [str(registry_path)],
+            }
+            configure(parse_config(values, Path("/tmp/config.yaml")))
+            tool = mcp._tool_manager._tools["odoo_sale_order_custom_operation"]
+
+            self.assertNotIn("note", tool.parameters["required"])
+            with patch("mcp_odoo.server.OdooClient") as client:
+                client.return_value.call_public.return_value = "done"
+                result = tool.fn(ids=[12], note="reviewed")
+                tool.fn(ids=[12], note=None)
+
+            self.assertEqual(result, "done")
+            self.assertEqual(
+                client.return_value.call_public.call_args_list[0].args,
+                (
+                    "sale.order",
+                    "custom_operation",
+                    [12],
+                    {"note": "reviewed"},
+                ),
+            )
+            self.assertEqual(
+                client.return_value.call_public.call_args_list[1].args,
+                (
+                    "sale.order",
+                    "custom_operation",
+                    [12],
+                    {},
+                ),
+            )
 
     def test_reconfigure_removes_tools_not_in_the_new_whitelist(self) -> None:
         configure(self.config(["create_record", "delete_record"]))
