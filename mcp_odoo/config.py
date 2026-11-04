@@ -20,6 +20,8 @@ WHITELISTABLE_TOOLS = frozenset(
     {
         "read_messages",
         "post_message",
+        "archive_records",
+        "schedule_activity",
         "search_records",
         "read_record",
         "create_record",

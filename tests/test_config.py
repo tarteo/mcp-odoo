@@ -39,12 +39,23 @@ class ConfigTests(unittest.TestCase):
         config = self.parse({"whitelist": ["exec"]})
         self.assertEqual(config.whitelist, frozenset({"exec"}))
 
+    def test_schedule_activity_is_an_optional_whitelistable_tool(self) -> None:
+        config = self.parse({"whitelist": ["schedule_activity"]})
+        self.assertEqual(config.whitelist, frozenset({"schedule_activity"}))
+
+    def test_archive_records_is_an_optional_whitelistable_tool(self) -> None:
+        config = self.parse({"whitelist": ["archive_records"]})
+        self.assertEqual(config.whitelist, frozenset({"archive_records"}))
+
     def test_core_registry_method_can_be_whitelisted(self) -> None:
         config = self.parse({"whitelist": ["sale.order.action_confirm"]})
         spec = config.method_registry["sale.order.action_confirm"]
         self.assertEqual(spec.model, "sale.order")
         self.assertEqual(spec.method, "action_confirm")
         self.assertEqual(spec.parameters["ids"]["type"], "array")
+        self.assertNotIn("crm.lead.activity_schedule", config.method_registry)
+        self.assertNotIn("project.task.activity_schedule", config.method_registry)
+        self.assertNotIn("project.task.action_archive", config.method_registry)
 
     def test_custom_registry_file_can_be_whitelisted(self) -> None:
         with TemporaryDirectory() as directory:

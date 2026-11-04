@@ -80,6 +80,8 @@ def load_method_registry_file(path: Path) -> dict[str, MethodSpec]:
     except yaml.YAMLError as exc:
         raise RegistryError(f"invalid YAML in method registry {path}: {exc}") from exc
 
+    if root is None:
+        return {}
     root = _mapping(root, f"method registry {path}")
     return parse_method_registry(root, f"method registry {path}")
 

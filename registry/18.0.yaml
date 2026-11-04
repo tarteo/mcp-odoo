@@ -1,9 +1,122 @@
 sale.order.action_confirm:
-  description: Confirm the selected sales orders.
+  description: Confirm selected quotations or sales orders. This consequential action may create deliveries or other follow-up documents and may send configured confirmation emails.
   parameters:
     ids:
       type: array
       description: IDs of the sales orders to confirm.
       required: true
+      items:
+        type: integer
+
+sale.order.action_quotation_sent:
+  description: Mark selected draft quotations as sent in Odoo. This changes their state but does not send an email.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the quotations to mark as sent.
+      items:
+        type: integer
+
+purchase.order.button_confirm:
+  description: Confirm selected purchase orders. Odoo may move an order to the approval state depending on the company's double-validation settings.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the purchase orders to confirm.
+      items:
+        type: integer
+
+purchase.order.button_approve:
+  description: Approve selected purchase orders that are awaiting approval. Odoo's approval rules still apply.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the purchase orders to approve.
+      items:
+        type: integer
+
+stock.picking.action_assign:
+  description: Check availability and reserve stock for the selected transfers. This changes inventory reservations.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the stock transfers to reserve.
+      items:
+        type: integer
+
+account.move.action_post:
+  description: Post selected invoices or journal entries. This is a consequential accounting action; Odoo may return a follow-up action for configured validation workflows.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the invoices or journal entries to post.
+      items:
+        type: integer
+
+crm.lead.action_set_won:
+  description: Mark selected leads or opportunities as won and move them to the appropriate won stage.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the leads or opportunities to mark as won.
+      items:
+        type: integer
+
+crm.lead.action_set_lost:
+  description: Mark selected leads or opportunities as lost by archiving them. Optionally record a lost reason.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the leads or opportunities to mark as lost.
+      items:
+        type: integer
+    lost_reason_id:
+      type: integer
+      description: Optional ID of the CRM lost-reason record.
+      required: false
+
+mail.activity.action_feedback:
+  description: Mark selected activities as done, optionally posting feedback and attaching existing files. Completing an activity removes it from the active activity list.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the activities to complete.
+      items:
+        type: integer
+    feedback:
+      type: string
+      description: Optional completion note to post on the related record.
+      required: false
+    attachment_ids:
+      type: array
+      description: Optional IDs of existing attachments to include with the completion message.
+      required: false
+      items:
+        type: integer
+
+hr.leave.action_approve:
+  description: Approve selected time-off requests according to Odoo's configured approval flow. This is an HR approval action and may be the first or final approval.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the time-off requests to approve.
+      items:
+        type: integer
+
+hr.leave.action_refuse:
+  description: Refuse selected time-off requests. Odoo may notify the employee and update related calendar events.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the time-off requests to refuse.
+      items:
+        type: integer
+
+calendar.event.action_sendmail:
+  description: Send meeting invitations for the selected calendar events to their attendees. This sends email externally.
+  parameters:
+    ids:
+      type: array
+      description: IDs of the calendar events whose invitations should be sent.
       items:
         type: integer

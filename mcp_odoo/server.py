@@ -342,12 +342,94 @@ def post_message(
     )
 
 
+@mcp.tool()
+def schedule_activity(
+    model: Annotated[str, Field(description="Technical name of a model that supports mail.activity.mixin.")],
+    ids: Annotated[list[int], Field(description="IDs of the records on which to schedule the activity.")],
+    act_type_xmlid: Annotated[
+        str | None,
+        Field(description="Optional external ID of the activity type."),
+    ] = None,
+    activity_type_id: Annotated[
+        int | None,
+        Field(description="Optional database ID of the activity type."),
+    ] = None,
+    date_deadline: Annotated[
+        str | None,
+        Field(description="Optional deadline as YYYY-MM-DD; defaults to today."),
+    ] = None,
+    summary: Annotated[str | None, Field(description="Optional short activity title.")] = None,
+    note: Annotated[str | None, Field(description="Optional activity note.")] = None,
+    user_id: Annotated[
+        int | None,
+        Field(description="Optional Odoo user ID to assign the activity to."),
+    ] = None,
+) -> object:
+    """Schedule an activity on records of any model that implements mail.activity.mixin."""
+    if not model.strip():
+        raise ValueError("model must not be empty")
+    if not isinstance(ids, list) or not ids or any(
+        not isinstance(record_id, int)
+        or isinstance(record_id, bool)
+        or record_id < 1
+        for record_id in ids
+    ):
+        raise ValueError("ids must be a non-empty list of positive integers")
+    if activity_type_id is not None and (
+        not isinstance(activity_type_id, int)
+        or isinstance(activity_type_id, bool)
+        or activity_type_id < 1
+    ):
+        raise ValueError("activity_type_id must be a positive integer")
+    if user_id is not None and (
+        not isinstance(user_id, int) or isinstance(user_id, bool) or user_id < 1
+    ):
+        raise ValueError("user_id must be a positive integer")
+    if act_type_xmlid and activity_type_id is not None:
+        raise ValueError("provide either act_type_xmlid or activity_type_id, not both")
+
+    params: dict[str, Any] = {}
+    if act_type_xmlid:
+        params["act_type_xmlid"] = act_type_xmlid
+    if activity_type_id is not None:
+        params["activity_type_id"] = activity_type_id
+    if date_deadline is not None:
+        params["date_deadline"] = date_deadline
+    if summary is not None:
+        params["summary"] = summary
+    if note is not None:
+        params["note"] = note
+    if user_id is not None:
+        params["user_id"] = user_id
+    return OdooClient(_cfg().instance).call_public(model, "activity_schedule", ids, params)
+
+
+@mcp.tool()
+def archive_records(
+    model: Annotated[str, Field(description="Technical name of the Odoo model to archive records from.")],
+    ids: Annotated[list[int], Field(description="IDs of the records to archive.")],
+) -> object:
+    """Archive records on a model with an active field, using its Odoo action_archive behavior."""
+    if not model.strip():
+        raise ValueError("model must not be empty")
+    if not isinstance(ids, list) or not ids or any(
+        not isinstance(record_id, int)
+        or isinstance(record_id, bool)
+        or record_id < 1
+        for record_id in ids
+    ):
+        raise ValueError("ids must be a non-empty list of positive integers")
+    return OdooClient(_cfg().instance).call_public(model, "action_archive", ids, {})
+
+
 _TOOL_FUNCTIONS = {
     "config_info": config_info,
     "list_models": list_models,
     "get_model_fields": get_model_fields,
     "read_messages": read_messages,
     "post_message": post_message,
+    "schedule_activity": schedule_activity,
+    "archive_records": archive_records,
     "search_records": search_records,
     "read_record": read_record,
     "create_record": create_record,

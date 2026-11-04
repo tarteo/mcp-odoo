@@ -6,7 +6,15 @@ from unittest.mock import MagicMock, patch
 
 from mcp_odoo.config import ALWAYS_AVAILABLE_TOOLS, ConfigError, parse_config
 from mcp_odoo.odoo_client import Json2Adapter, LegacyRpcAdapter, OdooError, adapter_for
-from mcp_odoo.server import configure, create_record, exec as exec_method, mcp, record_resource
+from mcp_odoo.server import (
+    archive_records,
+    configure,
+    create_record,
+    exec as exec_method,
+    mcp,
+    record_resource,
+    schedule_activity,
+)
 
 
 class ServerTests(unittest.TestCase):
@@ -34,10 +42,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(len(mcp._resource_manager._templates), 3)
 
     def test_registered_method_tool_uses_registry_metadata_and_dispatches(self) -> None:
-        configure(self.config(["sale.order.action_confirm"]))
+        configure(self.config(["sale.order.action_confirm"], version="18.0"))
         tool = mcp._tool_manager._tools["odoo_sale_order_action_confirm"]
 
-        self.assertEqual(tool.description, "Confirm the selected sales orders.")
+        self.assertIn("Confirm selected quotations or sales orders", tool.description)
         self.assertEqual(
             tool.parameters["properties"]["ids"]["items"]["type"],
             "integer",
@@ -53,13 +61,15 @@ class ServerTests(unittest.TestCase):
             result = tool.fn(ids=[7, 8])
 
         self.assertIs(result, True)
-        client.assert_called_once_with(self.config(["sale.order.action_confirm"]).instance)
+        client.assert_called_once_with(
+            self.config(["sale.order.action_confirm"], version="18.0").instance
+        )
         client.return_value.call_public.assert_called_once_with(
             "sale.order", "action_confirm", [7, 8], {}
         )
 
     def test_reconfigure_removes_method_tools_not_in_the_whitelist(self) -> None:
-        configure(self.config(["sale.order.action_confirm"]))
+        configure(self.config(["sale.order.action_confirm"], version="18.0"))
         configure(self.config())
         self.assertNotIn("odoo_sale_order_action_confirm", mcp._tool_manager._tools)
 
@@ -130,6 +140,63 @@ class ServerTests(unittest.TestCase):
             result = create_record("res.partner", {"name": "Example"})
         self.assertEqual(result, 7)
         client.assert_called_once_with(self.config(["create_record"]).instance)
+
+    def test_generic_activity_tool_calls_the_mixin_method_for_the_requested_model(self) -> None:
+        configure(self.config(["schedule_activity"]))
+        tool = mcp._tool_manager._tools["schedule_activity"]
+
+        self.assertIn("model", tool.parameters["required"])
+        self.assertIn("ids", tool.parameters["required"])
+        with patch("mcp_odoo.server.OdooClient") as client:
+            client.return_value.call_public.return_value = [31]
+            result = schedule_activity(
+                "crm.lead",
+                [7, 8],
+                act_type_xmlid="mail.mail_activity_data_call",
+                date_deadline="2026-11-10",
+                summary="Call about the proposal",
+                user_id=4,
+            )
+
+        self.assertEqual(result, [31])
+        client.assert_called_once_with(self.config(["schedule_activity"]).instance)
+        client.return_value.call_public.assert_called_once_with(
+            "crm.lead",
+            "activity_schedule",
+            [7, 8],
+            {
+                "act_type_xmlid": "mail.mail_activity_data_call",
+                "date_deadline": "2026-11-10",
+                "summary": "Call about the proposal",
+                "user_id": 4,
+            },
+        )
+
+    def test_generic_activity_tool_rejects_conflicting_activity_type_selectors(self) -> None:
+        configure(self.config(["schedule_activity"]))
+        with self.assertRaisesRegex(ValueError, "either act_type_xmlid or activity_type_id"):
+            schedule_activity(
+                "project.task",
+                [9],
+                act_type_xmlid="mail.mail_activity_data_todo",
+                activity_type_id=2,
+            )
+
+    def test_generic_archive_tool_calls_base_action_on_requested_model(self) -> None:
+        configure(self.config(["archive_records"]))
+        tool = mcp._tool_manager._tools["archive_records"]
+
+        self.assertIn("model", tool.parameters["required"])
+        self.assertIn("ids", tool.parameters["required"])
+        with patch("mcp_odoo.server.OdooClient") as client:
+            client.return_value.call_public.return_value = True
+            result = archive_records("res.partner", [11, 12])
+
+        self.assertIs(result, True)
+        client.assert_called_once_with(self.config(["archive_records"]).instance)
+        client.return_value.call_public.assert_called_once_with(
+            "res.partner", "action_archive", [11, 12], {}
+        )
 
     def test_exec_calls_public_method_with_ids_and_named_parameters(self) -> None:
         configure(self.config(["exec"]))

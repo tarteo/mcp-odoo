@@ -38,7 +38,7 @@ Set `MCP_ODOO_RC` to use a different directory. Each config file represents exac
 
 **Tool access**
 
-- `whitelist` *(required)* — list of tools to expose. It may be empty. Available built-in names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, `delete_record`, and `exec`. It may also contain a registered Odoo method key such as `sale.order.action_confirm`.
+- `whitelist` *(required)* — list of tools to expose. It may be empty. Available built-in names are `read_messages`, `post_message`, `schedule_activity`, `archive_records`, `search_records`, `read_record`, `create_record`, `update_record`, `delete_record`, and `exec`. It may also contain a registered Odoo method key such as `sale.order.action_confirm`.
 - `registry` *(optional)* — list of method registry YAML file paths. If omitted, the bundled `registry/<version>.yaml` is used. If supplied, the listed files are merged and replace that default; include the bundled file if you want its methods too. Relative paths are resolved beside `config.yaml` first, then from the application root. Absolute paths are supported for mounted registry files.
 - `config_info`, `list_models`, and `get_model_fields` are always available and do not need to be listed.
 - Resource reads are allowed only when their corresponding `read_messages`, `search_records`, or `read_record` tool is whitelisted.
@@ -81,7 +81,9 @@ The connection version is required. The server does not infer it from the URL. T
 
 ## Odoo method registry
 
-Core method definitions live in the bundled `registry/<version>.yaml` files and are shared by every connection using this server version. A whitelist entry registers the matching method as a typed MCP tool. For example, `sale.order.action_confirm` creates the tool `odoo_sale_order_action_confirm`, with its description and parameter schema from the registry. The registry is version-specific because Odoo method availability and signatures can differ between releases.
+Core method definitions live in the bundled `registry/<version>.yaml` files and are shared by every connection using this server version. These entries are curated from the corresponding official Odoo core source tree (`addons/` and `odoo/addons/`); they are not discovered from a connected database and do not include Enterprise or custom addons. A whitelist entry registers the matching method as a typed MCP tool. For example, `sale.order.action_confirm` creates the tool `odoo_sale_order_action_confirm`, with its description and parameter schema from the registry. The registry is version-specific because Odoo method availability and signatures can differ between releases.
+
+The Odoo 18 registry includes selected CRM, project, activity, sales, purchasing, inventory, accounting, time-off, and calendar actions. This includes operations such as confirming orders, posting accounting entries, approving time off, completing activities, and emailing meeting invitations. Their descriptions call out consequential changes and external email effects. These methods are only exposed when explicitly added to `whitelist`; Odoo permissions and approval checks still apply.
 
 To add custom methods, create another registry file and list its path in `registry`. For example, `mycustom.yaml` could contain:
 
@@ -203,6 +205,8 @@ The server exposes a standard MCP surface.
   - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200.
   - `read_messages` — read chatter messages (newest first) of a record on a `mail.thread` model. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
   - `post_message` — post a message, or an internal note with `internal_note`, on a `mail.thread` record and return the message ID. Treated as a mutation.
+  - `schedule_activity` — schedule an activity on records for any model that implements `mail.activity.mixin`. Accepts the model, record IDs, and optional activity type, deadline, summary, note, and assigned user. Requires `schedule_activity` in the whitelist.
+  - `archive_records` — archive records on a model with an active field, using Odoo's base `action_archive` behavior and any model-specific overrides. Requires `archive_records` in the whitelist.
   - `search_records` — search a model using an Odoo domain, optional fields, and pagination. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0. Binary and image fields are omitted unless named in `fields`.
   - `read_record` — fetch a record by model and record ID, optionally selecting fields. Binary and image fields are omitted unless named in `fields`.
   - `create_record` — create a record from a field/value mapping and return its new record ID.
