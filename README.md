@@ -113,6 +113,8 @@ The whitelist controls MCP tool availability, not Odoo permissions. Odoo access 
 
 `exec` is intentionally broad: when enabled, it can call any method on any model available to the configured Odoo user. Methods can perform arbitrary business actions, including irreversible changes or external side effects. Odoo access rights and record rules still apply, but they do not guarantee that each method independently checks access. Enable `exec` only for trusted MCP clients and consider using a dedicated Odoo account with narrowly scoped permissions. Methods whose names start with `_` are rejected.
 
+`config_info`, `list_models`, and `get_model_fields` are always available. All other tools are registered only when listed in the root-level `whitelist`.
+
 ## Version compatibility
 
 The configured version selects a compatibility adapter. The generic CRUD contract stays consistent across supported versions; adapters isolate differences in RPC behavior, capabilities, and model metadata. Generic CRUD uses the actual model and field names accepted by that Odoo version. It does not guess that arbitrary fields in user-provided domains or value mappings should be renamed.
@@ -214,7 +216,7 @@ The server exposes a standard MCP surface.
   - `delete_record` — delete a record by model and record ID. Deletion is permanent in Odoo.
   - `exec` — invoke a method by model and method name, with optional record `ids` and named `params`. For example, `exec("sale.order", "action_confirm", ids=[42])` calls the method on that order. Odoo 20's JSON-2 API accepts named method parameters; supply them in `params` rather than as positional arguments. This tool is available only when `exec` is in the whitelist and may cause arbitrary business side effects.
   - Registry methods — one typed tool per whitelisted `model.method` entry, named `odoo_<model>_<method>` with dots replaced by underscores. Their descriptions and input schemas come from the versioned core registry and any additional registry files listed in `registry`.
-  - `config_info`, `list_models`, and `get_model_fields` are always available. All other tools are registered only when listed in the root-level `whitelist`.
+
 - **resources/** — read-only record views:
   - `odoo://models/{model}/records` — up to 20 records from a model; reading requires `search_records` in the whitelist.
   - `odoo://models/{model}/records/{record_id}` — one record by ID; reading requires `read_record` in the whitelist.
