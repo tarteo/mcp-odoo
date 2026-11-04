@@ -201,6 +201,35 @@ def delete_record(model: str, record_id: int) -> bool:
     return _call(model, "unlink", [[record_id]])
 
 
+@mcp.tool()
+def exec(
+    model: str,
+    method: str,
+    ids: list[int] | None = None,
+    params: dict[str, Any] | None = None,
+) -> object:
+    """Call a public Odoo model method with optional record IDs and named parameters."""
+    if not model.strip():
+        raise ValueError("model must not be empty")
+    if not method.strip():
+        raise ValueError("method must not be empty")
+    if method.startswith("_"):
+        raise ValueError("private Odoo methods cannot be called")
+    if ids is not None and (
+        not isinstance(ids, list)
+        or any(not isinstance(record_id, int) or isinstance(record_id, bool) for record_id in ids)
+    ):
+        raise ValueError("ids must be a list of integers")
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("params must be an object")
+    params = params or {}
+    if any(not isinstance(key, str) for key in params):
+        raise ValueError("params keys must be strings")
+    if "ids" in params:
+        raise ValueError("pass record IDs using the ids argument")
+    return OdooClient(_cfg().instance).call_public(model, method, ids, params)
+
+
 _MESSAGE_FIELDS = ["id", "date", "author_id", "message_type", "subtype_id", "subject", "body"]
 
 
@@ -259,6 +288,7 @@ _TOOL_FUNCTIONS = {
     "create_record": create_record,
     "update_record": update_record,
     "delete_record": delete_record,
+    "exec": exec,
 }
 _registered_tool_names.update(_TOOL_FUNCTIONS)
 

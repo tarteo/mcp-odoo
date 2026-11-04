@@ -38,7 +38,7 @@ Set `MCP_ODOO_RC` to use a different directory. Each config file represents exac
 
 **Tool access**
 
-- `whitelist` *(required)* — list of tools to expose. It may be empty. Available names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, and `delete_record`.
+- `whitelist` *(required)* — list of tools to expose. It may be empty. Available names are `read_messages`, `post_message`, `search_records`, `read_record`, `create_record`, `update_record`, `delete_record`, and `exec`.
 - `config_info`, `list_models`, and `get_model_fields` are always available and do not need to be listed.
 - Resource reads are allowed only when their corresponding `read_messages`, `search_records`, or `read_record` tool is whitelisted.
 
@@ -77,6 +77,8 @@ The connection version is required. The server does not infer it from the URL. T
 Only whitelisted tools (plus the three always-available tools) are registered with MCP. Resource reads independently check for the matching read tool in the whitelist.
 
 The whitelist controls MCP tool availability, not Odoo permissions. Odoo access rights and record rules still apply, so use a dedicated Odoo user with only the permissions the configured tools need.
+
+`exec` is intentionally broad: when enabled, it can call any method on any model available to the configured Odoo user. Methods can perform arbitrary business actions, including irreversible changes or external side effects. Odoo access rights and record rules still apply, but they do not guarantee that each method independently checks access. Enable `exec` only for trusted MCP clients and consider using a dedicated Odoo account with narrowly scoped permissions. Methods whose names start with `_` are rejected.
 
 ## Version compatibility
 
@@ -173,6 +175,7 @@ The server exposes a standard MCP surface.
   - `create_record` — create a record from a field/value mapping and return its new record ID.
   - `update_record` — update a record by model and record ID using a field/value mapping.
   - `delete_record` — delete a record by model and record ID. Deletion is permanent in Odoo.
+  - `exec` — invoke a method by model and method name, with optional record `ids` and named `params`. For example, `exec("sale.order", "action_confirm", ids=[42])` calls the method on that order. Odoo 20's JSON-2 API accepts named method parameters; supply them in `params` rather than as positional arguments. This tool is available only when `exec` is in the whitelist and may cause arbitrary business side effects.
   - `config_info`, `list_models`, and `get_model_fields` are always available. All other tools are registered only when listed in the root-level `whitelist`.
 - **resources/** — read-only record views:
   - `odoo://models/{model}/records` — up to 20 records from a model; reading requires `search_records` in the whitelist.

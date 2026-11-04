@@ -34,6 +34,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.instance.database, "main")
         self.assertEqual(config.whitelist, frozenset())
 
+    def test_exec_is_an_optional_whitelistable_tool(self) -> None:
+        config = self.parse({"whitelist": ["exec"]})
+        self.assertEqual(config.whitelist, frozenset({"exec"}))
+
     def test_whitelist_requires_known_optional_tool_names(self) -> None:
         invalid = dict(self.instance)
         invalid.pop("whitelist")

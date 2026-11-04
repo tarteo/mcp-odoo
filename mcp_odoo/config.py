@@ -17,6 +17,7 @@ WHITELISTABLE_TOOLS = frozenset(
         "create_record",
         "update_record",
         "delete_record",
+        "exec",
     }
 )
 

@@ -74,6 +74,17 @@ class LegacyRpcAdapter:
             LOGGER.debug("Odoo XML-RPC call failed: %s", exc)
             raise OdooError(f"Odoo XML-RPC call failed: {exc}") from exc
 
+    def call_public(
+        self,
+        model: str,
+        method: str,
+        ids: list[int] | None,
+        params: dict,
+    ) -> object:
+        if method.startswith("_"):
+            raise OdooError("private Odoo methods cannot be called")
+        return self.call(model, method, [ids] if ids is not None else [], params)
+
 
 @dataclass(frozen=True, slots=True)
 class _Json2Method:
@@ -98,15 +109,36 @@ class Json2Adapter:
         self.instance = instance
 
     def call(self, model: str, method: str, args: list, kwargs: dict) -> object:
-        try:
-            method_spec = self._METHODS[method]
-        except KeyError:
-            raise OdooError(f"unsupported Odoo JSON-2 method: {method}") from None
-
         parameters = dict(kwargs)
-        for key, value in zip(method_spec.parameters, args):
-            parameters.setdefault(key, value)
+        method_spec = self._METHODS.get(method)
+        if method_spec is None:
+            if args:
+                raise OdooError(
+                    "Odoo JSON-2 requires named parameters for arbitrary methods"
+                )
+        else:
+            for key, value in zip(method_spec.parameters, args):
+                parameters.setdefault(key, value)
 
+        return self._request(model, method, parameters)
+
+    def call_public(
+        self,
+        model: str,
+        method: str,
+        ids: list[int] | None,
+        params: dict,
+    ) -> object:
+        if method.startswith("_"):
+            raise OdooError("private Odoo methods cannot be called")
+        if "ids" in params:
+            raise OdooError("pass record IDs using the ids argument")
+        parameters = dict(params)
+        if ids is not None:
+            parameters["ids"] = ids
+        return self._request(model, method, parameters)
+
+    def _request(self, model: str, method: str, parameters: dict) -> object:
         url = (
             f"{self.instance.url}/json/2/{quote(model, safe='')}/"
             f"{quote(method, safe='')}"
@@ -150,3 +182,12 @@ class OdooClient:
 
     def call(self, model: str, method: str, args: list | None = None, kwargs: dict | None = None) -> object:
         return self.adapter.call(model, method, args or [], kwargs or {})
+
+    def call_public(
+        self,
+        model: str,
+        method: str,
+        ids: list[int] | None = None,
+        params: dict | None = None,
+    ) -> object:
+        return self.adapter.call_public(model, method, ids, params or {})
