@@ -1,9 +1,0 @@
-sale.order.action_confirm:
-  description: Confirm the selected sales orders.
-  parameters:
-    ids:
-      type: array
-      description: IDs of the sales orders to confirm.
-      required: true
-      items:
-        type: integer
