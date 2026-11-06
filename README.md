@@ -1,5 +1,7 @@
 # mcp-odoo
 
+> **USE AT YOUR OWN RISK**
+
 A local [Model Context Protocol](https://modelcontextprotocol.io/) server for working with Odoo records. Connect an Odoo database, inspect models and fields, and search, read, create, update, or delete records through your MCP client. The server supports Odoo 18.0, 19.0, and 20.0.
 
 ## Example prompts
