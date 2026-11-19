@@ -39,7 +39,7 @@ class ConfigError(ValueError):
 @dataclass(frozen=True, slots=True)
 class InstanceConfig:
     url: str
-    database: str
+    database: str | None
     username: str
     api_key: str
     version: str
@@ -76,6 +76,15 @@ def _required_string(values: dict, key: str, name: str) -> str:
     return value.strip()
 
 
+def _optional_string(values: dict, key: str, name: str) -> str | None:
+    value = values.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{name}.{key}: expected a non-empty string when provided")
+    return value.strip()
+
+
 def _registry_path(value: str, config_file: Path) -> Path:
     path = Path(value).expanduser()
     if path.is_absolute():
@@ -102,7 +111,7 @@ def parse_config(data: object, path: Path | None = None) -> Config:
 
     instance = InstanceConfig(
         url=url,
-        database=_required_string(root, "database", "config"),
+        database=_optional_string(root, "database", "config"),
         username=_required_string(root, "username", "config"),
         api_key=_required_string(root, "api_key", "config"),
         version=version,

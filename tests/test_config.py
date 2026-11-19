@@ -35,6 +35,19 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.instance.database, "main")
         self.assertEqual(config.whitelist, frozenset())
 
+    def test_database_can_be_omitted_for_per_request_selection(self) -> None:
+        values = dict(self.instance)
+        values.pop("database")
+        self.assertIsNone(parse_config(values, Path("/tmp/config.yaml")).instance.database)
+
+        config = self.parse({"database": None})
+        self.assertIsNone(config.instance.database)
+
+    def test_provided_database_must_be_non_empty(self) -> None:
+        for value in ("", "  ", 1):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, "database"):
+                self.parse({"database": value})
+
     def test_exec_is_an_optional_whitelistable_tool(self) -> None:
         config = self.parse({"whitelist": ["exec"]})
         self.assertEqual(config.whitelist, frozenset({"exec"}))

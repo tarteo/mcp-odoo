@@ -28,12 +28,12 @@ $MCP_ODOO_RC/config.yaml
 $HOME/.config/mcp-odoo/config.yaml  # when MCP_ODOO_RC is unset
 ```
 
-Set `MCP_ODOO_RC` to use a different directory. Each config file represents exactly one Odoo connection. To connect to multiple databases, create a separate config directory and MCP server entry for each one.
+Set `MCP_ODOO_RC` to use a different directory. A configured database is used as the default. For local development, omit `database` to select a database separately on each operation; the configured username and API key are then used to authenticate against the selected database.
 
 **Connection**
 
 - `url` *(required)* — base URL of the Odoo server.
-- `database` *(required)* — Odoo database name.
+- `database` *(optional)* — default Odoo database name. If omitted, provide a `database` argument on every database operation and use a database-qualified resource URI. A per-request database overrides this default.
 - `username` *(required)* — Odoo user account.
 - `api_key` *(required)* — API key for that Odoo user. Treat it as a secret.
 - `version` *(required)* — Odoo version: `18.0`, `19.0`, or `20.0`.
@@ -205,8 +205,8 @@ The server exposes a standard MCP surface.
 
 - **tools/** — high-level actions:
   - `config_info` — show the config file path, connection details, and whitelist; never return the API key.
-  - `list_models` — search models by technical name or label (`search`, case-insensitive substring). `limit` defaults to 50 and is capped at 200.
-  - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200.
+  - `list_models` — search models by technical name or label (`search`, case-insensitive substring). `limit` defaults to 50 and is capped at 200; `database` optionally selects the target database.
+  - `get_model_fields` — inspect a model's fields and metadata, filtered by `search` on field name or label. `limit` defaults to 50 and is capped at 200; `database` optionally selects the target database.
   - `read_messages` — read chatter messages (newest first) of a record on a `mail.thread` model. `limit` defaults to 20 and is capped at 100; `offset` defaults to 0.
   - `post_message` — post a message, or an internal note with `internal_note`, on a `mail.thread` record and return the message ID. Treated as a mutation.
   - `schedule_activity` — schedule an activity on records for any model that implements `mail.activity.mixin`. Accepts the model, record IDs, and optional activity type, deadline, summary, note, and assigned user. Requires `schedule_activity` in the whitelist.
@@ -220,11 +220,14 @@ The server exposes a standard MCP surface.
   - Registry methods — one typed tool per whitelisted `model.method` entry, named `odoo_<model>_<method>` with dots replaced by underscores. Their descriptions and input schemas come from the versioned core registry and any additional registry files listed in `registry`.
 
 - **resources/** — read-only record views:
-  - `odoo://models/{model}/records` — up to 20 records from a model; reading requires `search_records` in the whitelist.
-  - `odoo://models/{model}/records/{record_id}` — one record by ID; reading requires `read_record` in the whitelist.
-  - `odoo://models/{model}/records/{record_id}/messages` — latest 20 chatter messages of a record; reading requires `read_messages` in the whitelist.
+  - `odoo://models/{model}/records` — up to 20 records from a model in the configured default database; reading requires `search_records` in the whitelist.
+  - `odoo://models/{model}/records/{record_id}` — one record by ID in the configured default database; reading requires `read_record` in the whitelist.
+  - `odoo://models/{model}/records/{record_id}/messages` — latest 20 chatter messages in the configured default database; reading requires `read_messages` in the whitelist.
+  - `odoo://databases/{database}/models/{model}/records` — up to 20 records from a model in the selected database.
+  - `odoo://databases/{database}/models/{model}/records/{record_id}` — one record by ID in the selected database.
+  - `odoo://databases/{database}/models/{model}/records/{record_id}/messages` — latest 20 chatter messages in the selected database.
 
-Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions. To connect to multiple Odoo databases, configure a separate MCP server entry and config directory for each one.
+Odoo access rights and record rules still apply to every operation; the server does not grant access beyond the configured user's permissions. To work with multiple databases, omit the default `database` and select the target on each tool call or database-qualified resource read.
 
 ## Domain-specific shortcuts
 

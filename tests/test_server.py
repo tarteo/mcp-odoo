@@ -10,10 +10,12 @@ from mcp_odoo.server import (
     archive_records,
     configure,
     create_record,
+    database_model_records_resource,
     exec as exec_method,
     mcp,
     record_resource,
     schedule_activity,
+    search_records,
 )
 
 
@@ -39,7 +41,7 @@ class ServerTests(unittest.TestCase):
         configure(self.config(whitelist))
         names = set(mcp._tool_manager._tools)
         self.assertEqual(names, ALWAYS_AVAILABLE_TOOLS | set(whitelist))
-        self.assertEqual(len(mcp._resource_manager._templates), 3)
+        self.assertEqual(len(mcp._resource_manager._templates), 6)
 
     def test_registered_method_tool_uses_registry_metadata_and_dispatches(self) -> None:
         configure(self.config(["sale.order.action_confirm"], version="18.0"))
@@ -55,17 +57,19 @@ class ServerTests(unittest.TestCase):
             "IDs of the sales orders to confirm.",
         )
         self.assertIn("ids", tool.parameters["required"])
+        self.assertNotIn("database", tool.parameters["required"])
+        self.assertIn("database", tool.parameters["properties"])
 
         with patch("mcp_odoo.server.OdooClient") as client:
             client.return_value.call_public.return_value = True
-            result = tool.fn(ids=[7, 8])
+            result = tool.fn(ids=[7, 8], database="staging")
 
         self.assertIs(result, True)
         client.assert_called_once_with(
             self.config(["sale.order.action_confirm"], version="18.0").instance
         )
         client.return_value.call_public.assert_called_once_with(
-            "sale.order", "action_confirm", [7, 8], {}
+            "sale.order", "action_confirm", [7, 8], {}, database="staging"
         )
 
     def test_reconfigure_removes_method_tools_not_in_the_whitelist(self) -> None:
@@ -140,6 +144,55 @@ class ServerTests(unittest.TestCase):
             result = create_record("res.partner", {"name": "Example"})
         self.assertEqual(result, 7)
         client.assert_called_once_with(self.config(["create_record"]).instance)
+
+    def test_request_database_is_used_when_no_database_is_configured(self) -> None:
+        values = {**self.instance, "whitelist": []}
+        values.pop("database")
+        config = parse_config(values, Path("/tmp/config.yaml"))
+        configure(config)
+
+        with patch("mcp_odoo.server.OdooClient") as client:
+            client.return_value.call.return_value = [{"name": "Example"}]
+            result = search_records(
+                "res.partner", fields=["name"], database="development"
+            )
+
+        self.assertEqual(result, [{"name": "Example"}])
+        client.assert_called_once_with(config.instance)
+        client.return_value.call.assert_called_once_with(
+            "res.partner",
+            "search_read",
+            [[]],
+            {"fields": ["name"], "limit": 20, "offset": 0},
+            database="development",
+        )
+
+    def test_request_database_is_required_when_no_default_is_configured(self) -> None:
+        values = dict(self.instance)
+        values.pop("database")
+        configure(parse_config(values, Path("/tmp/config.yaml")))
+
+        with self.assertRaisesRegex(OdooError, "database is required"):
+            search_records("res.partner", fields=["name"])
+
+    def test_database_qualified_resource_uses_requested_database(self) -> None:
+        values = {**self.instance, "whitelist": ["search_records"]}
+        values.pop("database")
+        configure(parse_config(values, Path("/tmp/config.yaml")))
+
+        with patch("mcp_odoo.server.OdooClient") as client:
+            client.return_value.call.side_effect = [[], [{"id": 7}]]
+            result = database_model_records_resource("development", "res.partner")
+
+        self.assertEqual(result, [{"id": 7}])
+        self.assertEqual(len(client.return_value.call.call_args_list), 2)
+        client.return_value.call.assert_called_with(
+            "res.partner",
+            "search_read",
+            [[]],
+            {"fields": None, "limit": 20, "offset": 0},
+            database="development",
+        )
 
     def test_generic_activity_tool_calls_the_mixin_method_for_the_requested_model(self) -> None:
         configure(self.config(["schedule_activity"]))
@@ -248,6 +301,29 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer secret")
         self.assertEqual(request.get_header("X-odoo-database"), "main")
 
+    def test_json2_uses_request_database_when_configured_database_is_absent(self) -> None:
+        values = dict(self.instance)
+        values.pop("database")
+        instance = parse_config(values, Path("/tmp/config.yaml")).instance
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b"[]"
+
+        with patch("mcp_odoo.odoo_client.urlopen", return_value=response) as open_url:
+            Json2Adapter(instance).call(
+                "res.partner", "search", [[]], {}, database="development"
+            )
+
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_header("X-odoo-database"), "development")
+
+    def test_json2_requires_database_when_config_has_no_default(self) -> None:
+        values = dict(self.instance)
+        values.pop("database")
+        instance = parse_config(values, Path("/tmp/config.yaml")).instance
+
+        with self.assertRaisesRegex(OdooError, "database is required"):
+            Json2Adapter(instance).call("res.partner", "search", [[]], {})
+
     def test_json2_exec_posts_ids_and_named_parameters_for_arbitrary_method(self) -> None:
         instance = self.config().instance
         response = MagicMock()
@@ -296,6 +372,28 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             execute_kw.call_args.args[4:],
             ("action_confirm", [[7, 8]], {"context": {"lang": "en_US"}}),
+        )
+
+    def test_legacy_rpc_uses_request_database_for_authentication_and_calls(self) -> None:
+        instance = self.config(version="18.0").instance
+        common = MagicMock()
+        common.__enter__.return_value.authenticate.return_value = 1
+        objects = MagicMock()
+        objects.__enter__.return_value.execute_kw.return_value = True
+
+        with patch("mcp_odoo.odoo_client.xmlrpc.client.ServerProxy", side_effect=[common, objects]):
+            result = LegacyRpcAdapter(instance).call(
+                "res.partner", "search", [[]], {}, database="development"
+            )
+
+        self.assertIs(result, True)
+        self.assertEqual(
+            common.__enter__.return_value.authenticate.call_args.args[0],
+            "development",
+        )
+        self.assertEqual(
+            objects.__enter__.return_value.execute_kw.call_args.args[0],
+            "development",
         )
 
     def test_adapter_uses_the_configured_odoo_version(self) -> None:

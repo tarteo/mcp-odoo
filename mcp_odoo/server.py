@@ -12,6 +12,15 @@ from .odoo_client import OdooClient
 from .registry import MethodSpec
 
 mcp = FastMCP("odoo")
+Database = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Target Odoo database; required when no default is configured and "
+            "overrides a configured default."
+        )
+    ),
+]
 _config: Config | None = None
 _registered_tool_names: set[str] = set()
 _registered_method_tool_names: set[str] = set()
@@ -69,8 +78,25 @@ def _call(
     method: str,
     args: list | None = None,
     kwargs: dict | None = None,
+    database: str | None = None,
 ) -> object:
-    return OdooClient(_cfg().instance).call(model, method, args, kwargs)
+    client = OdooClient(_cfg().instance)
+    if database is None:
+        return client.call(model, method, args, kwargs)
+    return client.call(model, method, args, kwargs, database=database)
+
+
+def _call_public(
+    model: str,
+    method: str,
+    ids: list[int] | None,
+    params: dict,
+    database: str | None = None,
+) -> object:
+    client = OdooClient(_cfg().instance)
+    if database is None:
+        return client.call_public(model, method, ids, params)
+    return client.call_public(model, method, ids, params, database=database)
 
 
 def _parameter_annotation(parameter: dict[str, Any]) -> Any:
@@ -91,18 +117,25 @@ def _parameter_annotation(parameter: dict[str, Any]) -> Any:
 def _method_tool(spec: MethodSpec):
     def invoke(**arguments: Any) -> object:
         arguments = {name: value for name, value in arguments.items() if value is not None}
+        database = arguments.pop("database", None)
         ids = arguments.pop("ids", None)
-        return OdooClient(_cfg().instance).call_public(
+        return _call_public(
             spec.model,
             spec.method,
             ids,
             arguments,
+            database,
         )
 
     invoke.__name__ = spec.tool_name
     invoke.__doc__ = spec.description
     parameters = []
     for name, definition in spec.parameters.items():
+        if name == "database":
+            raise ConfigError(
+                f"registry method {spec.model}.{spec.method} uses 'database', which is reserved "
+                "for selecting the target Odoo database"
+            )
         default = inspect.Parameter.empty if definition["required"] else None
         annotation = _parameter_annotation(definition)
         if default is None:
@@ -115,6 +148,14 @@ def _method_tool(spec: MethodSpec):
                 annotation=annotation,
             )
         )
+    parameters.append(
+        inspect.Parameter(
+            "database",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=Database,
+        )
+    )
     invoke.__signature__ = inspect.Signature(parameters, return_annotation=Any)
     return invoke
 
@@ -122,6 +163,7 @@ def _method_tool(spec: MethodSpec):
 def _readable_fields(
     model: str,
     fields: list[str] | None,
+    database: str | None = None,
 ) -> list[str] | None:
     """Explicit fields win; otherwise list all non-binary fields of the model."""
     if fields:
@@ -131,6 +173,7 @@ def _readable_fields(
         "search_read",
         [[("model", "=", model), ("ttype", "!=", "binary")]],
         {"fields": ["name"]},
+        database,
     )
     return [record["name"] for record in records] or None
 
@@ -155,6 +198,7 @@ def config_info() -> dict:
 def list_models(
     search: str | None = None,
     limit: int = 50,
+    database: Database = None,
 ) -> list[dict]:
     """Search models by technical name or label (case-insensitive substring). Omit search to list the first models."""
     if limit < 1:
@@ -165,6 +209,7 @@ def list_models(
         "search_read",
         [domain],
         {"fields": ["model", "name"], "limit": min(limit, 200), "order": "model"},
+        database,
     )
 
 
@@ -173,6 +218,7 @@ def get_model_fields(
     model: str,
     search: str | None = None,
     limit: int = 50,
+    database: Database = None,
 ) -> dict:
     """Return field definitions for an Odoo model, filtered by a case-insensitive substring of the field name or label."""
     if limit < 1:
@@ -189,6 +235,7 @@ def get_model_fields(
             "limit": min(limit, 200),
             "order": "name",
         },
+        database,
     )
     return {
         record["name"]: {
@@ -210,6 +257,7 @@ def search_records(
     fields: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
+    database: Database = None,
 ) -> list[dict]:
     """Search records using an Odoo domain with bounded pagination. Binary/image fields are omitted unless listed in fields."""
     if limit < 1:
@@ -221,10 +269,11 @@ def search_records(
         "search_read",
         [domain or []],
         {
-            "fields": _readable_fields(model, fields),
+            "fields": _readable_fields(model, fields, database),
             "limit": min(limit, 100),
             "offset": offset,
         },
+        database,
     )
 
 
@@ -233,21 +282,27 @@ def read_record(
     model: str,
     record_id: int,
     fields: list[str] | None = None,
+    database: Database = None,
 ) -> dict | None:
     """Read one record by ID. Binary/image fields are omitted unless listed in fields."""
     records = _call(
         model,
         "read",
         [[record_id]],
-        {"fields": _readable_fields(model, fields)},
+        {"fields": _readable_fields(model, fields, database)},
+        database,
     )
     return records[0] if records else None
 
 
 @mcp.tool()
-def create_record(model: str, values: dict[str, Any]) -> int:
+def create_record(
+    model: str,
+    values: dict[str, Any],
+    database: Database = None,
+) -> int:
     """Create a record and return its new Odoo ID."""
-    return _call(model, "create", [[values]])
+    return _call(model, "create", [[values]], database=database)
 
 
 @mcp.tool()
@@ -255,15 +310,20 @@ def update_record(
     model: str,
     record_id: int,
     values: dict[str, Any],
+    database: Database = None,
 ) -> bool:
     """Update a record using Odoo field names and values."""
-    return _call(model, "write", [[record_id], values])
+    return _call(model, "write", [[record_id], values], database=database)
 
 
 @mcp.tool()
-def delete_record(model: str, record_id: int) -> bool:
+def delete_record(
+    model: str,
+    record_id: int,
+    database: Database = None,
+) -> bool:
     """Permanently delete a record from Odoo."""
-    return _call(model, "unlink", [[record_id]])
+    return _call(model, "unlink", [[record_id]], database=database)
 
 
 @mcp.tool()
@@ -272,6 +332,7 @@ def exec(
     method: str,
     ids: list[int] | None = None,
     params: dict[str, Any] | None = None,
+    database: Database = None,
 ) -> object:
     """Call a public Odoo model method with optional record IDs and named parameters."""
     if not model.strip():
@@ -292,18 +353,25 @@ def exec(
         raise ValueError("params keys must be strings")
     if "ids" in params:
         raise ValueError("pass record IDs using the ids argument")
-    return OdooClient(_cfg().instance).call_public(model, method, ids, params)
+    return _call_public(model, method, ids, params, database)
 
 
 _MESSAGE_FIELDS = ["id", "date", "author_id", "message_type", "subtype_id", "subject", "body"]
 
 
-def _messages(model: str, record_id: int, limit: int, offset: int) -> list[dict]:
+def _messages(
+    model: str,
+    record_id: int,
+    limit: int,
+    offset: int,
+    database: str | None = None,
+) -> list[dict]:
     return _call(
         "mail.message",
         "search_read",
         [[("model", "=", model), ("res_id", "=", record_id)]],
         {"fields": _MESSAGE_FIELDS, "limit": limit, "offset": offset, "order": "date desc, id desc"},
+        database,
     )
 
 
@@ -313,13 +381,14 @@ def read_messages(
     record_id: int,
     limit: int = 20,
     offset: int = 0,
+    database: Database = None,
 ) -> list[dict]:
     """Read chatter messages (newest first) of a record whose model inherits mail.thread."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
     if offset < 0:
         raise ValueError("offset must not be negative")
-    return _messages(model, record_id, min(limit, 100), offset)
+    return _messages(model, record_id, min(limit, 100), offset, database)
 
 
 @mcp.tool()
@@ -328,6 +397,7 @@ def post_message(
     record_id: int,
     body: str,
     internal_note: bool = False,
+    database: Database = None,
 ) -> int:
     """Post a message (or internal note) on a mail.thread record and return the message ID."""
     return _call(
@@ -339,6 +409,7 @@ def post_message(
             "message_type": "comment",
             "subtype_xmlid": "mail.mt_note" if internal_note else "mail.mt_comment",
         },
+        database,
     )
 
 
@@ -364,6 +435,7 @@ def schedule_activity(
         int | None,
         Field(description="Optional Odoo user ID to assign the activity to."),
     ] = None,
+    database: Database = None,
 ) -> object:
     """Schedule an activity on records of any model that implements mail.activity.mixin."""
     if not model.strip():
@@ -401,13 +473,14 @@ def schedule_activity(
         params["note"] = note
     if user_id is not None:
         params["user_id"] = user_id
-    return OdooClient(_cfg().instance).call_public(model, "activity_schedule", ids, params)
+    return _call_public(model, "activity_schedule", ids, params, database)
 
 
 @mcp.tool()
 def archive_records(
     model: Annotated[str, Field(description="Technical name of the Odoo model to archive records from.")],
     ids: Annotated[list[int], Field(description="IDs of the records to archive.")],
+    database: Database = None,
 ) -> object:
     """Archive records on a model with an active field, using its Odoo action_archive behavior."""
     if not model.strip():
@@ -419,7 +492,7 @@ def archive_records(
         for record_id in ids
     ):
         raise ValueError("ids must be a non-empty list of positive integers")
-    return OdooClient(_cfg().instance).call_public(model, "action_archive", ids, {})
+    return _call_public(model, "action_archive", ids, {}, database)
 
 
 _TOOL_FUNCTIONS = {
@@ -468,5 +541,47 @@ def record_resource(model: str, record_id: str) -> dict | None:
         "read",
         [[int(record_id)]],
         {"fields": _readable_fields(model, None)},
+    )
+    return records[0] if records else None
+
+
+@mcp.resource("odoo://databases/{database}/models/{model}/records/{record_id}/messages")
+def database_record_messages_resource(
+    database: str,
+    model: str,
+    record_id: str,
+) -> list[dict]:
+    """Latest 20 chatter messages of a record in the selected database."""
+    _require_resource_permission("read_messages")
+    return _messages(model, int(record_id), 20, 0, database)
+
+
+@mcp.resource("odoo://databases/{database}/models/{model}/records")
+def database_model_records_resource(database: str, model: str) -> list[dict]:
+    """Recent records from an Odoo model in the selected database."""
+    _require_resource_permission("search_records")
+    return _call(
+        model,
+        "search_read",
+        [[]],
+        {"fields": _readable_fields(model, None, database), "limit": 20, "offset": 0},
+        database,
+    )
+
+
+@mcp.resource("odoo://databases/{database}/models/{model}/records/{record_id}")
+def database_record_resource(
+    database: str,
+    model: str,
+    record_id: str,
+) -> dict | None:
+    """One Odoo record by ID in the selected database."""
+    _require_resource_permission("read_record")
+    records = _call(
+        model,
+        "read",
+        [[int(record_id)]],
+        {"fields": _readable_fields(model, None, database)},
+        database,
     )
     return records[0] if records else None

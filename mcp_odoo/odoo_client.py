@@ -37,7 +37,15 @@ class LegacyRpcAdapter:
     def __init__(self, instance: InstanceConfig):
         self.instance = instance
 
-    def call(self, model: str, method: str, args: list, kwargs: dict) -> object:
+    def call(
+        self,
+        model: str,
+        method: str,
+        args: list,
+        kwargs: dict,
+        database: str | None = None,
+    ) -> object:
+        database = _resolve_database(self.instance, database)
         common_url = f"{self.instance.url}/xmlrpc/2/common"
         object_url = f"{self.instance.url}/xmlrpc/2/object"
         transport = _TimeoutSafeTransport() if self.instance.url.startswith("https:") else _TimeoutTransport()
@@ -46,7 +54,7 @@ class LegacyRpcAdapter:
                 common_url, transport=transport, allow_none=True, use_builtin_types=True
             ) as common:
                 user_id = common.authenticate(
-                    self.instance.database,
+                    database,
                     self.instance.username,
                     self.instance.api_key,
                     {},
@@ -57,7 +65,7 @@ class LegacyRpcAdapter:
                 object_url, transport=transport, allow_none=True, use_builtin_types=True
             ) as objects:
                 result = objects.execute_kw(
-                    self.instance.database,
+                    database,
                     user_id,
                     self.instance.api_key,
                     model,
@@ -80,10 +88,17 @@ class LegacyRpcAdapter:
         method: str,
         ids: list[int] | None,
         params: dict,
+        database: str | None = None,
     ) -> object:
         if method.startswith("_"):
             raise OdooError("private Odoo methods cannot be called")
-        return self.call(model, method, [ids] if ids is not None else [], params)
+        return self.call(
+            model,
+            method,
+            [ids] if ids is not None else [],
+            params,
+            database=database,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +123,14 @@ class Json2Adapter:
     def __init__(self, instance: InstanceConfig):
         self.instance = instance
 
-    def call(self, model: str, method: str, args: list, kwargs: dict) -> object:
+    def call(
+        self,
+        model: str,
+        method: str,
+        args: list,
+        kwargs: dict,
+        database: str | None = None,
+    ) -> object:
         parameters = dict(kwargs)
         method_spec = self._METHODS.get(method)
         if method_spec is None:
@@ -120,7 +142,7 @@ class Json2Adapter:
             for key, value in zip(method_spec.parameters, args):
                 parameters.setdefault(key, value)
 
-        return self._request(model, method, parameters)
+        return self._request(model, method, parameters, database=database)
 
     def call_public(
         self,
@@ -128,6 +150,7 @@ class Json2Adapter:
         method: str,
         ids: list[int] | None,
         params: dict,
+        database: str | None = None,
     ) -> object:
         if method.startswith("_"):
             raise OdooError("private Odoo methods cannot be called")
@@ -136,9 +159,16 @@ class Json2Adapter:
         parameters = dict(params)
         if ids is not None:
             parameters["ids"] = ids
-        return self._request(model, method, parameters)
+        return self._request(model, method, parameters, database=database)
 
-    def _request(self, model: str, method: str, parameters: dict) -> object:
+    def _request(
+        self,
+        model: str,
+        method: str,
+        parameters: dict,
+        database: str | None = None,
+    ) -> object:
+        database = _resolve_database(self.instance, database)
         url = (
             f"{self.instance.url}/json/2/{quote(model, safe='')}/"
             f"{quote(method, safe='')}"
@@ -148,7 +178,7 @@ class Json2Adapter:
             data=json.dumps(parameters).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {self.instance.api_key}",
-                "X-Odoo-Database": self.instance.database,
+                "X-Odoo-Database": database,
                 "Content-Type": "application/json",
                 "User-Agent": "mcp-odoo",
             },
@@ -176,12 +206,30 @@ def adapter_for(instance: InstanceConfig) -> LegacyRpcAdapter | Json2Adapter:
     raise OdooError(f"unsupported configured Odoo version: {instance.version}")
 
 
+def _resolve_database(instance: InstanceConfig, database: str | None) -> str:
+    selected = database if database is not None else instance.database
+    if not isinstance(selected, str) or not selected.strip():
+        raise OdooError(
+            "database is required for this request when config.yaml does not specify one"
+        )
+    return selected.strip()
+
+
 class OdooClient:
     def __init__(self, instance: InstanceConfig):
         self.adapter = adapter_for(instance)
 
-    def call(self, model: str, method: str, args: list | None = None, kwargs: dict | None = None) -> object:
-        return self.adapter.call(model, method, args or [], kwargs or {})
+    def call(
+        self,
+        model: str,
+        method: str,
+        args: list | None = None,
+        kwargs: dict | None = None,
+        database: str | None = None,
+    ) -> object:
+        return self.adapter.call(
+            model, method, args or [], kwargs or {}, database=database
+        )
 
     def call_public(
         self,
@@ -189,5 +237,8 @@ class OdooClient:
         method: str,
         ids: list[int] | None = None,
         params: dict | None = None,
+        database: str | None = None,
     ) -> object:
-        return self.adapter.call_public(model, method, ids, params or {})
+        return self.adapter.call_public(
+            model, method, ids, params or {}, database=database
+        )
